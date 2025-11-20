@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Questionário Operacional</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    label { display: block; margin-bottom: 6px; font-weight: bold; }
+    input, select { width: 100%; padding: 8px; margin-bottom: 12px; }
+    button { padding: 10px 14px; background: #0b6efd; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #questions { margin-top: 20px; }
+    .status { margin-top: 8px; color: #0b6efd; }
+  </style>
+</head>
+<body>
+  <h1>Questionário Operacional</h1>
+  <div id="login-card" class="card">
+    <h2>Login</h2>
+    <label for="username">Usuário</label>
+    <input id="username" type="text" placeholder="usuario" />
+    <label for="password">Senha</label>
+    <input id="password" type="password" placeholder="senha" />
+    <button id="login-btn">Entrar</button>
+    <p id="login-status" class="status"></p>
+  </div>
+
+  <div id="app" style="display:none;">
+    <div class="card">
+      <h2>Perguntas do dia</h2>
+      <p id="today"></p>
+      <div id="questions"></div>
+      <button id="refresh-btn">Atualizar</button>
+    </div>
+  </div>
+
+  <script>
+    const loginBtn = document.getElementById('login-btn');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const loginStatus = document.getElementById('login-status');
+    const app = document.getElementById('app');
+    const questionsContainer = document.getElementById('questions');
+    const todayLabel = document.getElementById('today');
+    let token = null;
+
+    function setStatus(message, error = false) {
+      loginStatus.textContent = message;
+      loginStatus.style.color = error ? 'red' : '#0b6efd';
+    }
+
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const form = new URLSearchParams();
+      form.append('username', username);
+      form.append('password', password);
+
+      try {
+        const res = await fetch('/auth/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: form.toString(),
+        });
+        if (!res.ok) throw new Error('Credenciais inválidas');
+        const data = await res.json();
+        token = data.access_token;
+        setStatus('Login realizado. Carregando perguntas...');
+        document.getElementById('login-card').style.display = 'none';
+        app.style.display = 'block';
+        await loadQuestions();
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    async function loadQuestions() {
+      const today = new Date().toISOString().slice(0, 10);
+      todayLabel.textContent = `Data de referência: ${today}`;
+      questionsContainer.innerHTML = '<p>Carregando...</p>';
+      const res = await fetch('/questions/today', { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        questionsContainer.innerHTML = '<p>Erro ao carregar perguntas.</p>';
+        return;
+      }
+      const data = await res.json();
+      if (!data.length) {
+        questionsContainer.innerHTML = '<p>Não há perguntas agendadas para hoje.</p>';
+        return;
+      }
+      questionsContainer.innerHTML = '';
+      data.forEach((item) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'card';
+        const input = document.createElement('input');
+        input.id = `q-${item.question.id}`;
+        input.type = item.question.response_type === 'number' ? 'number' : 'text';
+        input.value = item.answer ? item.answer.answer_value : '';
+        const label = document.createElement('label');
+        label.textContent = item.question.prompt;
+        const button = document.createElement('button');
+        button.textContent = 'Salvar';
+        button.onclick = () => saveAnswer(item.question.id, input.value);
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+        wrapper.appendChild(button);
+        if (item.answer) {
+          const saved = document.createElement('p');
+          saved.className = 'status';
+          saved.textContent = `Respondido em ${item.answer.answer_date}`;
+          wrapper.appendChild(saved);
+        }
+        questionsContainer.appendChild(wrapper);
+      });
+    }
+
+    async function saveAnswer(questionId, value) {
+      const payload = { question_id: questionId, answer_value: value };
+      const res = await fetch('/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        await loadQuestions();
+      } else {
+        const error = await res.json();
+        alert(error.detail || 'Erro ao salvar');
+      }
+    }
+
+    loginBtn.addEventListener('click', login);
+    refreshBtn.addEventListener('click', loadQuestions);
+  </script>
+</body>
+</html>
